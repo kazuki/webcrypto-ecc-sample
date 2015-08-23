@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Web Cryptography Test</title>
+    <meta charset="UTF-8">
+    <script src="b64.js" type="text/javascript"></script>
+    <script src="test.js" type="text/javascript"></script>
+  </head>
+  <body>
+    <fieldset>
+      <legend>Private Keys</legend>
+      <select id="private_keys" size="1">
+      </select>
+      <button id="private_key_generate">Generate</button>
+      <button id="private_key_delete">Delete</button>
+      <button id="private_key_export_public">Export Public Key</button>
+      <button id="private_key_export_private">Export Private Key</button>
+    </fieldset>
+    <fieldset>
+      <legend>Public Keys</legend>
+      <select id="public_keys" size="1">
+      </select>
+      <button id="public_key_import">Import</button>
+      <button id="public_key_delete">Delete</button>
+      <button id="public_key_export">Export</button>
+    </fieldset>
+    <fieldset>
+      <legend>Sign/Verify Test</legend>
+      <label for="msg">Text:</label><input type="text" name="msg" id="msg"><br>
+      <label for="sign">Signature:</label><input type="text" name="sign" id="sign"></br>
+      <button id="sign_msg">Generate Signature with selected private key</button><br>
+      <button id="verify_msg">Verify Signature with selected public key</button>
+    </fieldset>
+    <fieldset>
+      <legend>Encrypt/Decrypt Test</legend>
+      <label for="plain_text">Plain Text:</label><input type="text" name="plain_text" id="plain_text"><br>
+      <label for="cipher">Cipher:</label><input type="text" name="cipher" id="cipher"></br>
+      <button id="encrypt">Encrypt with selected public key</button><br>
+      <button id="decrypt">Decrypt with selected private key</button>
+    </fieldset>
+  </body>
+</html>
