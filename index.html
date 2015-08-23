@@ -26,14 +26,16 @@
     <fieldset>
       <legend>Sign/Verify Test</legend>
       <label for="msg">Text:</label><input type="text" name="msg" id="msg"><br>
-      <label for="sign">Signature:</label><input type="text" name="sign" id="sign"></br>
+      <label for="sign">Signature:</label><input type="text" name="sign" id="sign"><br>
       <button id="sign_msg">Generate Signature with selected private key</button><br>
       <button id="verify_msg">Verify Signature with selected public key</button>
     </fieldset>
     <fieldset>
       <legend>Encrypt/Decrypt Test</legend>
-      <label for="plain_text">Plain Text:</label><input type="text" name="plain_text" id="plain_text"><br>
-      <label for="cipher">Cipher:</label><input type="text" name="cipher" id="cipher"></br>
+      <label for="plain_text">Plain Text:</label><br>
+      <textarea name="plain_text" id="plain_text" cols="64" rows="6"></textarea><br>
+      <label for="cipher">Cipher:</label><br>
+      <textarea name="cipher" id="cipher" cols="64" rows="6"></textarea></br>
       <button id="encrypt">Encrypt with selected public key</button><br>
       <button id="decrypt">Decrypt with selected private key</button>
     </fieldset>

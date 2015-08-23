@@ -164,10 +164,10 @@ function main() {
     document.getElementById('encrypt').addEventListener('click', () => {
         var key = get_active_public_key_id();
         if (!key) return;
-        var data = str_to_buf((<HTMLInputElement>document.getElementById('plain_text')).value);
+        var data = str_to_buf((<HTMLTextAreaElement>document.getElementById('plain_text')).value);
         keyStore.find(key).then((key) => {
             WebCryptoSupplements.ecies_encrypt(keyStore.deriveAlgo, key.derive_key, data).then((encrypted) => {
-                (<HTMLInputElement>document.getElementById('cipher')).value = Base64URL.encode(encrypted);
+                (<HTMLTextAreaElement>document.getElementById('cipher')).value = Base64URL.encode(encrypted);
             }, (ev) => {
                 alert(ev);
             });
@@ -178,10 +178,10 @@ function main() {
     document.getElementById('decrypt').addEventListener('click', () => {
         var key = get_active_private_key_id();
         if (!key) return;
-        var data = Base64URL.decode((<HTMLInputElement>document.getElementById('cipher')).value);
+        var data = Base64URL.decode((<HTMLTextAreaElement>document.getElementById('cipher')).value);
         keyStore.find(key).then((key) => {
             WebCryptoSupplements.ecies_decrypt(keyStore.deriveAlgo, key.derive_key, data).then((plain) => {
-                (<HTMLInputElement>document.getElementById('plain_text')).value = buf_to_str(plain);
+                (<HTMLTextAreaElement>document.getElementById('plain_text')).value = buf_to_str(plain);
             }, (ev) => {
                 alert(ev);
             });
