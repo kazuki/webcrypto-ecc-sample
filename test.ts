@@ -1,104 +1,7 @@
 /// <reference path="typings/es6-promise.d.ts" />
 /// <reference path="keystore.ts" />
 /// <reference path="base64.ts" />
-
-function join_buf(bufs: Array<ArrayBuffer|ArrayBufferView>): ArrayBuffer {
-    var total_bytes = 0;
-    var inputs: Array<Uint8Array> = new Array(bufs.length);
-    for (var i = 0; i < bufs.length; ++i) {
-        if (bufs[i] instanceof ArrayBuffer) {
-            inputs[i] = new Uint8Array(<ArrayBuffer>bufs[i]);
-        } else {
-            inputs[i] = new Uint8Array((<ArrayBufferView>bufs[i]).buffer,
-                                     (<ArrayBufferView>bufs[i]).byteOffset,
-                                     (<ArrayBufferView>bufs[i]).byteLength);
-        }
-        total_bytes += inputs[i].length;
-    }
-    var buf = new ArrayBuffer(total_bytes);
-    var view = new Uint8Array(buf);
-    var off = 0;
-    for (var i = 0; i < inputs.length; ++i) {
-        view.set(inputs[i], off);
-        off += inputs[i].length;
-    }
-    return buf;
-}
-
-function webcrypto_suppl_ecies_encrypt(deriveAlgo, encryptAlgo, public_key: CryptoKey, data: ArrayBuffer): Promise<ArrayBuffer> {
-    // ECIESっぽいもので暗号化(仕様書見てないので厳密には準拠していない)
-    return new Promise((resolve, reject) => {
-        window.crypto.subtle.generateKey(deriveAlgo, true, ['deriveKey']).then((ephemeral_key) => {
-            window.crypto.subtle.exportKey('jwk', ephemeral_key.publicKey).then((ephemeral_pubkey) => {
-                var algo = {
-                    name: deriveAlgo.name,
-                    namedCurve: deriveAlgo.namedCurve,
-                    public: public_key
-                };
-                var x_buf = Base64URL.decode(ephemeral_pubkey.x);
-                var y_buf = Base64URL.decode(ephemeral_pubkey.y);
-                window.crypto.subtle.deriveKey(algo, ephemeral_key.privateKey, encryptAlgo, false, ['encrypt']).then((key) => {
-                    var iv = window.crypto.getRandomValues(new Uint8Array(12));
-                    encryptAlgo.iv = iv;
-                    window.crypto.subtle.encrypt(encryptAlgo, key, data).then((encrypted) => {
-                        var header = new Uint8Array(3);
-                        header[0] = x_buf.byteLength;
-                        header[1] = y_buf.byteLength;
-                        header[2] = iv.byteLength;
-                        var buf = join_buf([header, x_buf, y_buf, iv, encrypted]);
-                        resolve(buf);
-                    }, (ev) => {
-                        reject(ev);
-                    });
-                }, (ev) => {
-                    reject(ev);
-                });
-            }, (ev) => {
-                reject(ev);
-            });
-        }, (ev) => {
-            reject(ev);
-        });
-    });
-}
-
-function webcrypto_suppl_ecies_decrypt(deriveAlgo, encryptAlgo, private_key: CryptoKey, data: ArrayBuffer): Promise<ArrayBuffer> {
-    // ECIESっぽいもので復号(仕様書見てないので厳密には準拠していない)
-    var data8 = new Uint8Array(data);
-    var x_len = data8[0];
-    var y_len = data8[1];
-    var iv_len = data8[2];
-    var iv = new Uint8Array(data8.subarray(3 + x_len + y_len, 3 + x_len + y_len + iv_len)).buffer;
-    var ephemeral_jwt = {
-        crv: deriveAlgo.namedCurve,
-        ext: true,
-        kty: 'EC',
-        x: Base64URL.encode(data8.subarray(3, 3 + x_len)),
-        y: Base64URL.encode(data8.subarray(3 + x_len, 3 + x_len + y_len))
-    };
-    data8 = data8.subarray(3 + x_len + y_len + iv_len);
-    return new Promise((resolve, reject) => {
-        window.crypto.subtle.importKey('jwk', ephemeral_jwt, deriveAlgo, false, ['deriveKey']).then((public_key) => {
-            var algo = {
-                name: deriveAlgo.name,
-                namedCurve: deriveAlgo.namedCurve,
-                public: public_key
-            };
-            window.crypto.subtle.deriveKey(algo, private_key, encryptAlgo, false, ['decrypt']).then((key) => {
-                encryptAlgo.iv = iv;
-                window.crypto.subtle.decrypt(encryptAlgo, key, data8).then((decrypted) => {
-                    resolve(decrypted);
-                }, (ev) => {
-                    reject(ev);
-                });
-            }, (ev) => {
-                reject(ev);
-            });
-        }, (ev) => {
-            reject(ev);
-        });
-    });
-}
+/// <reference path="webcrypto_supplements.ts" />
 
 function main() {
     var keyStore = new KeyStore();
@@ -261,10 +164,10 @@ function main() {
     document.getElementById('encrypt').addEventListener('click', () => {
         var key = get_active_public_key_id();
         if (!key) return;
-        var data = str_to_buf((<HTMLInputElement>document.getElementById('plain_text')).value);
+        var data = str_to_buf((<HTMLTextAreaElement>document.getElementById('plain_text')).value);
         keyStore.find(key).then((key) => {
-            webcrypto_suppl_ecies_encrypt(keyStore.deriveAlgo, {name: "AES-GCM", length: 128}, key.derive_key, data).then((encrypted) => {
-                (<HTMLInputElement>document.getElementById('cipher')).value = Base64URL.encode(encrypted);
+            WebCryptoSupplements.ecies_encrypt(keyStore.deriveAlgo, key.derive_key, data).then((encrypted) => {
+                (<HTMLTextAreaElement>document.getElementById('cipher')).value = Base64URL.encode(encrypted);
             }, (ev) => {
                 alert(ev);
             });
@@ -275,10 +178,10 @@ function main() {
     document.getElementById('decrypt').addEventListener('click', () => {
         var key = get_active_private_key_id();
         if (!key) return;
-        var data = Base64URL.decode((<HTMLInputElement>document.getElementById('cipher')).value);
+        var data = Base64URL.decode((<HTMLTextAreaElement>document.getElementById('cipher')).value);
         keyStore.find(key).then((key) => {
-            webcrypto_suppl_ecies_decrypt(keyStore.deriveAlgo, {name: "AES-GCM", length: 128}, key.derive_key, data).then((plain) => {
-                (<HTMLInputElement>document.getElementById('plain_text')).value = buf_to_str(plain);
+            WebCryptoSupplements.ecies_decrypt(keyStore.deriveAlgo, key.derive_key, data).then((plain) => {
+                (<HTMLTextAreaElement>document.getElementById('plain_text')).value = buf_to_str(plain);
             }, (ev) => {
                 alert(ev);
             });

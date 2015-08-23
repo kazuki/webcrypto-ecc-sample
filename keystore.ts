@@ -1,14 +1,5 @@
 /// <reference path="typings/es6-promise.d.ts" />
-
-interface SubtleCrypto {
-    // jwk
-    importKey(format: string, keyData: any, algorithm: Algorithm, extractable: boolean, keyUsages: string[]): any;
-
-    // ArrayBuffer
-    encrypt(algorithm: Algorithm, key: CryptoKey, data: ArrayBuffer): any;
-    sign(algorithm: Algorithm, key: CryptoKey, data: ArrayBuffer): any;
-    verify(algorithm: Algorithm, key: CryptoKey, signature: ArrayBuffer, data: ArrayBuffer): any;
-}
+/// <reference path="typings/webcrypto.d.ts" />
 
 /*
  * KeyStore 
@@ -248,7 +239,7 @@ class KeyStore {
             };
             var ret = [];
             ret.push(window.crypto.subtle.importKey('jwk', pub, this.signAlgo, false, ['verify']));
-            ret.push(window.crypto.subtle.importKey('jwk', pub, this.deriveAlgo, false, ['deriveKey']));
+            ret.push(window.crypto.subtle.importKey('jwk', pub, this.deriveAlgo, false, ['deriveKey', 'deriveBits']));
             if (d) {
                 var priv = {
                     crv: this.signAlgo.namedCurve,
@@ -259,7 +250,7 @@ class KeyStore {
                     d: d,
                 };
                 ret.push(window.crypto.subtle.importKey('jwk', priv, this.signAlgo, false, ['sign']));
-                ret.push(window.crypto.subtle.importKey('jwk', priv, this.deriveAlgo, false, ['deriveKey']));
+                ret.push(window.crypto.subtle.importKey('jwk', priv, this.deriveAlgo, false, ['deriveKey', 'deriveBits']));
             }
             Promise.all(ret).then((values) => {
                 var ki = ret.length == 2 ?
