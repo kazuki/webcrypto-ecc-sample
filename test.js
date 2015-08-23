@@ -1,4 +1,5 @@
 /// <reference path="typings/es6-promise.d.ts" />
+/// <reference path="typings/webcrypto.d.ts" />
 var __extends = (this && this.__extends) || function (d, b) {
     for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p];
     function __() { this.constructor = d; }
@@ -243,7 +244,7 @@ var KeyStore = (function () {
             };
             var ret = [];
             ret.push(window.crypto.subtle.importKey('jwk', pub, _this.signAlgo, false, ['verify']));
-            ret.push(window.crypto.subtle.importKey('jwk', pub, _this.deriveAlgo, false, ['deriveKey']));
+            ret.push(window.crypto.subtle.importKey('jwk', pub, _this.deriveAlgo, false, ['deriveKey', 'deriveBits']));
             if (d) {
                 var priv = {
                     crv: _this.signAlgo.namedCurve,
@@ -254,7 +255,7 @@ var KeyStore = (function () {
                     d: d
                 };
                 ret.push(window.crypto.subtle.importKey('jwk', priv, _this.signAlgo, false, ['sign']));
-                ret.push(window.crypto.subtle.importKey('jwk', priv, _this.deriveAlgo, false, ['deriveKey']));
+                ret.push(window.crypto.subtle.importKey('jwk', priv, _this.deriveAlgo, false, ['deriveKey', 'deriveBits']));
             }
             Promise.all(ret).then(function (values) {
                 var ki = ret.length == 2 ?
@@ -385,102 +386,143 @@ var Base64URL = (function () {
     return Base64URL;
 })();
 /// <reference path="typings/es6-promise.d.ts" />
-/// <reference path="keystore.ts" />
 /// <reference path="base64.ts" />
-function join_buf(bufs) {
-    var total_bytes = 0;
-    var inputs = new Array(bufs.length);
-    for (var i = 0; i < bufs.length; ++i) {
-        if (bufs[i] instanceof ArrayBuffer) {
-            inputs[i] = new Uint8Array(bufs[i]);
-        }
-        else {
-            inputs[i] = new Uint8Array(bufs[i].buffer, bufs[i].byteOffset, bufs[i].byteLength);
-        }
-        total_bytes += inputs[i].length;
+/// <reference path="typings/webcrypto.d.ts" />
+var WebCryptoSupplements = (function () {
+    function WebCryptoSupplements() {
     }
-    var buf = new ArrayBuffer(total_bytes);
-    var view = new Uint8Array(buf);
-    var off = 0;
-    for (var i = 0; i < inputs.length; ++i) {
-        view.set(inputs[i], off);
-        off += inputs[i].length;
-    }
-    return buf;
-}
-function webcrypto_suppl_ecies_encrypt(deriveAlgo, encryptAlgo, public_key, data) {
-    // ECIESっぽいもので暗号化(仕様書見てないので厳密には準拠していない)
-    return new Promise(function (resolve, reject) {
-        window.crypto.subtle.generateKey(deriveAlgo, true, ['deriveKey']).then(function (ephemeral_key) {
-            window.crypto.subtle.exportKey('jwk', ephemeral_key.publicKey).then(function (ephemeral_pubkey) {
+    WebCryptoSupplements.ecies_encrypt = function (deriveAlgo, public_key, data) {
+        return new Promise(function (resolve, reject) {
+            if (deriveAlgo.name != 'ECDH') {
+                reject('invalid deriveAlgo.name');
+                return;
+            }
+            var key_bits = WebCryptoSupplements._recommended_aes_key_bits(deriveAlgo.namedCurve);
+            if (!key_bits) {
+                reject('invalid deriveAlgo.namedCurve');
+                return;
+            }
+            window.crypto.subtle.generateKey(deriveAlgo, true, ['deriveBits']).then(function (ephemeral_key) {
+                window.crypto.subtle.exportKey('jwk', ephemeral_key.publicKey).then(function (ephemeral_pubkey) {
+                    var algo = {
+                        name: deriveAlgo.name,
+                        namedCurve: deriveAlgo.namedCurve,
+                        public: public_key
+                    };
+                    var key_len = key_bits / 8;
+                    var iv_len = 12;
+                    var R = WebCryptoSupplements._ecc_point_to_bytes(algo.namedCurve, Base64URL.decode(ephemeral_pubkey.x), Base64URL.decode(ephemeral_pubkey.y));
+                    window.crypto.subtle.deriveBits(algo, ephemeral_key.privateKey, (key_len + iv_len) * 8).then(function (key_and_iv) {
+                        var key_jwt = {
+                            alg: 'A' + (key_len * 8) + 'GCM',
+                            ext: true,
+                            k: Base64URL.encode(new Uint8Array(key_and_iv, 0, key_len)),
+                            key_ops: ['encrypt'],
+                            kty: 'oct'
+                        };
+                        var encryptAlgo = {
+                            name: 'AES-GCM',
+                            length: key_bits,
+                            iv: new Uint8Array(key_and_iv, key_len, iv_len)
+                        };
+                        window.crypto.subtle.importKey('jwk', key_jwt, encryptAlgo, false, ['encrypt']).then(function (key) {
+                            window.crypto.subtle.encrypt(encryptAlgo, key, data).then(function (encrypted) {
+                                var output = new ArrayBuffer(R.byteLength + encrypted.byteLength);
+                                var view = new Uint8Array(output);
+                                view.set(new Uint8Array(R), 0);
+                                view.set(new Uint8Array(encrypted), R.byteLength);
+                                resolve(output);
+                            }, reject);
+                        }, reject);
+                    }, reject);
+                }, reject);
+            }, reject);
+        });
+    };
+    WebCryptoSupplements.ecies_decrypt = function (deriveAlgo, private_key, data) {
+        return new Promise(function (resolve, reject) {
+            if (deriveAlgo.name != 'ECDH') {
+                reject('invalid deriveAlgo.name');
+                return;
+            }
+            var key_bits = WebCryptoSupplements._recommended_aes_key_bits(deriveAlgo.namedCurve);
+            if (!key_bits) {
+                reject('invalid deriveAlgo.namedCurve');
+                return;
+            }
+            var pubkey_and_cipher = WebCryptoSupplements._ecc_bytes_to_point(deriveAlgo.namedCurve, data);
+            var cipher = pubkey_and_cipher[2];
+            var ephemeral_jwt = {
+                crv: deriveAlgo.namedCurve,
+                ext: true,
+                kty: 'EC',
+                x: Base64URL.encode(pubkey_and_cipher[0]),
+                y: Base64URL.encode(pubkey_and_cipher[1])
+            };
+            window.crypto.subtle.importKey('jwk', ephemeral_jwt, deriveAlgo, false, ['deriveBits']).then(function (public_key) {
                 var algo = {
                     name: deriveAlgo.name,
                     namedCurve: deriveAlgo.namedCurve,
                     public: public_key
                 };
-                var x_buf = Base64URL.decode(ephemeral_pubkey.x);
-                var y_buf = Base64URL.decode(ephemeral_pubkey.y);
-                window.crypto.subtle.deriveKey(algo, ephemeral_key.privateKey, encryptAlgo, false, ['encrypt']).then(function (key) {
-                    var iv = window.crypto.getRandomValues(new Uint8Array(12));
-                    encryptAlgo.iv = iv;
-                    window.crypto.subtle.encrypt(encryptAlgo, key, data).then(function (encrypted) {
-                        var header = new Uint8Array(3);
-                        header[0] = x_buf.byteLength;
-                        header[1] = y_buf.byteLength;
-                        header[2] = iv.byteLength;
-                        var buf = join_buf([header, x_buf, y_buf, iv, encrypted]);
-                        resolve(buf);
-                    }, function (ev) {
-                        reject(ev);
-                    });
-                }, function (ev) {
-                    reject(ev);
-                });
-            }, function (ev) {
-                reject(ev);
-            });
-        }, function (ev) {
-            reject(ev);
+                var key_len = key_bits / 8;
+                var iv_len = 12;
+                window.crypto.subtle.deriveBits(algo, private_key, (key_len + iv_len) * 8).then(function (key_and_iv) {
+                    var key_jwt = {
+                        alg: 'A' + (key_len * 8) + 'GCM',
+                        ext: true,
+                        k: Base64URL.encode(new Uint8Array(key_and_iv, 0, key_len)),
+                        key_ops: ['decrypt'],
+                        kty: 'oct'
+                    };
+                    var encryptAlgo = {
+                        name: 'AES-GCM',
+                        length: key_bits,
+                        iv: new Uint8Array(key_and_iv, key_len, iv_len)
+                    };
+                    window.crypto.subtle.importKey('jwk', key_jwt, encryptAlgo, false, ['decrypt']).then(function (key) {
+                        window.crypto.subtle.decrypt(encryptAlgo, key, cipher).then(function (plaintext) {
+                            resolve(plaintext);
+                        }, reject);
+                    }, reject);
+                }, reject);
+            }, reject);
         });
-    });
-}
-function webcrypto_suppl_ecies_decrypt(deriveAlgo, encryptAlgo, private_key, data) {
-    // ECIESっぽいもので復号(仕様書見てないので厳密には準拠していない)
-    var data8 = new Uint8Array(data);
-    var x_len = data8[0];
-    var y_len = data8[1];
-    var iv_len = data8[2];
-    var iv = new Uint8Array(data8.subarray(3 + x_len + y_len, 3 + x_len + y_len + iv_len)).buffer;
-    var ephemeral_jwt = {
-        crv: deriveAlgo.namedCurve,
-        ext: true,
-        kty: 'EC',
-        x: Base64URL.encode(data8.subarray(3, 3 + x_len)),
-        y: Base64URL.encode(data8.subarray(3 + x_len, 3 + x_len + y_len))
     };
-    data8 = data8.subarray(3 + x_len + y_len + iv_len);
-    return new Promise(function (resolve, reject) {
-        window.crypto.subtle.importKey('jwk', ephemeral_jwt, deriveAlgo, false, ['deriveKey']).then(function (public_key) {
-            var algo = {
-                name: deriveAlgo.name,
-                namedCurve: deriveAlgo.namedCurve,
-                public: public_key
-            };
-            window.crypto.subtle.deriveKey(algo, private_key, encryptAlgo, false, ['decrypt']).then(function (key) {
-                encryptAlgo.iv = iv;
-                window.crypto.subtle.decrypt(encryptAlgo, key, data8).then(function (decrypted) {
-                    resolve(decrypted);
-                }, function (ev) {
-                    reject(ev);
-                });
-            }, function (ev) {
-                reject(ev);
-            });
-        }, function (ev) {
-            reject(ev);
-        });
-    });
-}
+    WebCryptoSupplements._recommended_aes_key_bits = function (curveName) {
+        return {
+            'P-256': 128,
+            'P-384': 192,
+            'P-521': 256
+        }[curveName];
+    };
+    WebCryptoSupplements._ecc_point_to_bytes = function (curveName, x, y) {
+        var len = parseInt(curveName.slice(2)) / 8;
+        var out = new ArrayBuffer(len * 2 + 1);
+        var view = new Uint8Array(out);
+        view[0] = 4; // 点圧縮は常に利用しない
+        view.set(new Uint8Array(x), 1 + (len - x.byteLength));
+        view.set(new Uint8Array(y), 1 + len + (len - y.byteLength));
+        return out;
+    };
+    WebCryptoSupplements._ecc_bytes_to_point = function (curveName, data) {
+        var len = parseInt(curveName.slice(2)) / 8;
+        var view = data instanceof ArrayBuffer ? new Uint8Array(data)
+            : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+        var x = new ArrayBuffer(len);
+        var y = new ArrayBuffer(len);
+        if (view[0] != 4 || view.length < 1 + len * 2)
+            throw new Error('invalid data');
+        new Uint8Array(x).set(view.subarray(1, 1 + len));
+        new Uint8Array(y).set(view.subarray(1 + len, 1 + len * 2));
+        return [x, y, view.subarray(1 + len * 2)];
+    };
+    return WebCryptoSupplements;
+})();
+/// <reference path="typings/es6-promise.d.ts" />
+/// <reference path="keystore.ts" />
+/// <reference path="base64.ts" />
+/// <reference path="webcrypto_supplements.ts" />
 function main() {
     var keyStore = new KeyStore();
     var priv_list = document.getElementById('private_keys');
@@ -653,7 +695,7 @@ function main() {
             return;
         var data = str_to_buf(document.getElementById('plain_text').value);
         keyStore.find(key).then(function (key) {
-            webcrypto_suppl_ecies_encrypt(keyStore.deriveAlgo, { name: "AES-GCM", length: 128 }, key.derive_key, data).then(function (encrypted) {
+            WebCryptoSupplements.ecies_encrypt(keyStore.deriveAlgo, key.derive_key, data).then(function (encrypted) {
                 document.getElementById('cipher').value = Base64URL.encode(encrypted);
             }, function (ev) {
                 alert(ev);
@@ -668,7 +710,7 @@ function main() {
             return;
         var data = Base64URL.decode(document.getElementById('cipher').value);
         keyStore.find(key).then(function (key) {
-            webcrypto_suppl_ecies_decrypt(keyStore.deriveAlgo, { name: "AES-GCM", length: 128 }, key.derive_key, data).then(function (plain) {
+            WebCryptoSupplements.ecies_decrypt(keyStore.deriveAlgo, key.derive_key, data).then(function (plain) {
                 document.getElementById('plain_text').value = buf_to_str(plain);
             }, function (ev) {
                 alert(ev);
