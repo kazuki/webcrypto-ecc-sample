@@ -1,4 +1,10 @@
 /// <reference path="typings/es6-promise.d.ts" />
+var __extends = (this && this.__extends) || function (d, b) {
+    for (var p in b) if (b.hasOwnProperty(p)) d[p] = b[p];
+    function __() { this.constructor = d; }
+    __.prototype = b.prototype;
+    d.prototype = new __();
+};
 /*
  * KeyStore
  *
@@ -37,11 +43,14 @@
  *   verify_key: 署名検証に利用する公開鍵(CryptoKey),
  *   derive_key: 鍵交換に利用する公開鍵(CryptoKey),
  *   public_key: 公開鍵(JSON),
+ *   private_key: undefined,
+ *   sign_key: undefined,
  * }
  */
 var KeyStore = (function () {
     function KeyStore() {
         this.db = null;
+        this.store_name = 'keystore';
         this.signAlgo = null;
         this.deriveAlgo = null;
         var namedCurve = 'P-256';
@@ -55,12 +64,14 @@ var KeyStore = (function () {
             namedCurve: namedCurve
         };
     }
-    KeyStore.prototype.open = function (db_name) {
+    KeyStore.prototype.open = function (db_name, store_name) {
         var _this = this;
+        if (store_name)
+            this.store_name = store_name;
         var req = window.indexedDB.open(db_name, 1);
         req.onupgradeneeded = function () {
             var db = req.result;
-            db.createObjectStore('keystore', {
+            db.createObjectStore(_this.store_name, {
                 keyPath: 'id',
                 autoIncrement: false
             });
@@ -68,7 +79,7 @@ var KeyStore = (function () {
         return new Promise(function (resolve, reject) {
             req.onsuccess = function () {
                 _this.db = req.result;
-                resolve(_this.db);
+                resolve(_this);
             };
             req.onerror = function (ev) {
                 reject(ev);
@@ -96,8 +107,8 @@ var KeyStore = (function () {
                             'y': ecdsa_priv.y
                         }
                     };
-                    var transaction = _this.db.transaction(['keystore'], 'readwrite');
-                    var store = transaction.objectStore('keystore');
+                    var transaction = _this.db.transaction([_this.store_name], 'readwrite');
+                    var store = transaction.objectStore(_this.store_name);
                     var req = store.add(value);
                     req.onsuccess = function () {
                         _this._to_cryptokey(value).then(function (key) {
@@ -119,8 +130,8 @@ var KeyStore = (function () {
     };
     KeyStore.prototype.find = function (id) {
         var _this = this;
-        var transaction = this.db.transaction(['keystore']);
-        var store = transaction.objectStore('keystore');
+        var transaction = this.db.transaction([this.store_name]);
+        var store = transaction.objectStore(this.store_name);
         var req = store.get(id);
         return new Promise(function (resolve, reject) {
             req.onsuccess = function () {
@@ -141,8 +152,8 @@ var KeyStore = (function () {
         });
     };
     KeyStore.prototype.delete = function (id) {
-        var transaction = this.db.transaction(['keystore'], 'readwrite');
-        var store = transaction.objectStore('keystore');
+        var transaction = this.db.transaction([this.store_name], 'readwrite');
+        var store = transaction.objectStore(this.store_name);
         var req = store.delete(id);
         return new Promise(function (resolve, reject) {
             req.onsuccess = function () {
@@ -172,8 +183,8 @@ var KeyStore = (function () {
                         'y': pub.y
                     }
                 };
-                var transaction = _this.db.transaction(['keystore'], 'readwrite');
-                var store = transaction.objectStore('keystore');
+                var transaction = _this.db.transaction([_this.store_name], 'readwrite');
+                var store = transaction.objectStore(_this.store_name);
                 var req = store.add(value);
                 req.onsuccess = function () {
                     _this._to_cryptokey(value).then(function (key) {
@@ -192,8 +203,8 @@ var KeyStore = (function () {
     };
     KeyStore.prototype.list = function () {
         var _this = this;
-        var transaction = this.db.transaction(['keystore']);
-        var store = transaction.objectStore('keystore');
+        var transaction = this.db.transaction([this.store_name]);
+        var store = transaction.objectStore(this.store_name);
         var req = store.openCursor();
         var ret = [];
         return new Promise(function (resolve, reject) {
@@ -246,25 +257,9 @@ var KeyStore = (function () {
                 ret.push(window.crypto.subtle.importKey('jwk', priv, _this.deriveAlgo, false, ['deriveKey']));
             }
             Promise.all(ret).then(function (values) {
-                var ki = {
-                    id: stored_data.id,
-                    is_private: false,
-                    verify_key: values[0],
-                    derive_key: values[1],
-                    public_key: { x: x, y: y },
-                    sign_key: undefined,
-                    private_key: undefined
-                };
-                if (ret.length == 4) {
-                    ki.is_private = true;
-                    ki.sign_key = values[2];
-                    ki.derive_key = values[3];
-                    ki.private_key = {
-                        d: d,
-                        x: x,
-                        y: y
-                    };
-                }
+                var ki = ret.length == 2 ?
+                    new PublicKeyInfo(stored_data.id, values[0], values[1], { x: x, y: y }) :
+                    new PrivateKeyInfo(stored_data.id, values[2], values[0], values[3], { x: x, y: y, d: d }, { x: x, y: y });
                 resolve(ki);
             }).catch(function (ev) {
                 reject(ev);
@@ -273,36 +268,143 @@ var KeyStore = (function () {
     };
     return KeyStore;
 })();
-function buf_to_base64(buf) {
-    return base64js.fromByteArray(new Uint8Array(buf));
-}
-function base64_to_buf(str) {
-    return base64js.toByteArray(str).buffer;
-}
-function buf_to_base64url(buf) {
-    return base64js.fromByteArray(new Uint8Array(buf))
-        .replace(/\+/g, '-').replace('/\//g', '_').replace('/=/g', '');
-}
-function base64url_to_buf(str) {
-    str = str.replace(/-/g, '+').replace(/_/g, '/');
-    while (str.length % 4 != 0)
-        str += '=';
-    return base64js.toByteArray(str).buffer;
-}
+var KeyInfo = (function () {
+    function KeyInfo(id, is_private) {
+        this.id = id;
+        this.is_private = is_private;
+    }
+    return KeyInfo;
+})();
+var PublicKeyInfo = (function (_super) {
+    __extends(PublicKeyInfo, _super);
+    function PublicKeyInfo(id, verify_key, derive_key, public_key) {
+        _super.call(this, id, false);
+        this.verify_key = verify_key;
+        this.derive_key = derive_key;
+        this.public_key = public_key;
+        this.sign_key = undefined;
+        this.private_key = undefined;
+    }
+    return PublicKeyInfo;
+})(KeyInfo);
+var PrivateKeyInfo = (function (_super) {
+    __extends(PrivateKeyInfo, _super);
+    function PrivateKeyInfo(id, sign_key, verify_key, derive_key, private_key, public_key) {
+        _super.call(this, id, true);
+        this.sign_key = sign_key;
+        this.verify_key = verify_key;
+        this.derive_key = derive_key;
+        this.public_key = public_key;
+        this.private_key = private_key;
+    }
+    return PrivateKeyInfo;
+})(KeyInfo);
+var _Base64 = (function () {
+    function _Base64() {
+    }
+    _Base64.encode = function (chars, pad, data) {
+        var view = (data instanceof ArrayBuffer ? new Uint8Array(data) :
+            new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
+        var out = '';
+        var i = 0;
+        for (; i < view.length - 2; i += 3) {
+            out += chars[view[i] >> 2];
+            out += chars[((view[i] & 0x3) << 4) | (view[i + 1] >> 4)];
+            out += chars[((view[i + 1] & 0xf) << 2) | (view[i + 2] >> 6)];
+            out += chars[view[i + 2] & 0x3f];
+        }
+        if (view.length % 3) {
+            out += chars[view[i] >> 2];
+            if ((view.length % 3) == 2) {
+                out += chars[((view[i] & 0x3) << 4) | (view[i + 1] >> 4)];
+                out += chars[(view[i + 1] & 0xf) << 2];
+                if (pad)
+                    out += pad;
+            }
+            else {
+                out += chars[(view[i] & 0x3) << 4];
+                if (pad)
+                    out += pad + pad;
+            }
+        }
+        return out;
+    };
+    _Base64.decode = function (chars, pad, data) {
+        if (pad) {
+            var pos = data.indexOf(pad);
+            if (pos >= 0)
+                data = data.slice(0, pos);
+        }
+        var buf = new ArrayBuffer((data.length * 3) >> 2);
+        var view = new Uint8Array(buf);
+        var i = 0, j = 0;
+        for (; i < data.length - 3; i += 4, j += 3) {
+            var x0 = chars.indexOf(data[i]);
+            var x1 = chars.indexOf(data[i + 1]);
+            var x2 = chars.indexOf(data[i + 2]);
+            var x3 = chars.indexOf(data[i + 3]);
+            view[j] = (x0 << 2) | (x1 >> 4);
+            view[j + 1] = ((x1 & 0xf) << 4) | (x2 >> 2);
+            view[j + 2] = ((x2 & 0x3) << 6) | x3;
+        }
+        if (data.length % 4) {
+            var x0 = chars.indexOf(data[i]);
+            var x1 = chars.indexOf(data[i + 1]);
+            view[j++] = (x0 << 2) | (x1 >> 4);
+            if (i + 2 < data.length) {
+                var x2 = chars.indexOf(data[i + 2]);
+                view[j++] = ((x1 & 0xf) << 4) | (x2 >> 2);
+            }
+        }
+        return buf;
+    };
+    return _Base64;
+})();
+var Base64 = (function () {
+    function Base64() {
+    }
+    Base64.encode = function (data) {
+        return _Base64.encode(Base64.CHARS, '=', data);
+    };
+    Base64.decode = function (data) {
+        return _Base64.decode(Base64.CHARS, '=', data);
+    };
+    Base64.CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+    return Base64;
+})();
+var Base64URL = (function () {
+    function Base64URL() {
+    }
+    Base64URL.encode = function (data) {
+        return _Base64.encode(Base64URL.CHARS, null, data);
+    };
+    Base64URL.decode = function (data) {
+        return _Base64.decode(Base64URL.CHARS, null, data);
+    };
+    Base64URL.CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+    return Base64URL;
+})();
+/// <reference path="typings/es6-promise.d.ts" />
+/// <reference path="keystore.ts" />
+/// <reference path="base64.ts" />
 function join_buf(bufs) {
     var total_bytes = 0;
+    var inputs = new Array(bufs.length);
     for (var i = 0; i < bufs.length; ++i) {
-        if (!bufs[i].byteLength)
-            bufs[i] = bufs[i].buffer;
-        total_bytes += bufs[i].byteLength;
+        if (bufs[i] instanceof ArrayBuffer) {
+            inputs[i] = new Uint8Array(bufs[i]);
+        }
+        else {
+            inputs[i] = new Uint8Array(bufs[i].buffer, bufs[i].byteOffset, bufs[i].byteLength);
+        }
+        total_bytes += inputs[i].length;
     }
     var buf = new ArrayBuffer(total_bytes);
     var view = new Uint8Array(buf);
     var off = 0;
-    for (var i = 0; i < bufs.length; ++i) {
-        var tmp = new Uint8Array(bufs[i]);
-        view.set(tmp, off);
-        off += tmp.length;
+    for (var i = 0; i < inputs.length; ++i) {
+        view.set(inputs[i], off);
+        off += inputs[i].length;
     }
     return buf;
 }
@@ -316,8 +418,8 @@ function webcrypto_suppl_ecies_encrypt(deriveAlgo, encryptAlgo, public_key, data
                     namedCurve: deriveAlgo.namedCurve,
                     public: public_key
                 };
-                var x_buf = base64url_to_buf(ephemeral_pubkey.x);
-                var y_buf = base64url_to_buf(ephemeral_pubkey.y);
+                var x_buf = Base64URL.decode(ephemeral_pubkey.x);
+                var y_buf = Base64URL.decode(ephemeral_pubkey.y);
                 window.crypto.subtle.deriveKey(algo, ephemeral_key.privateKey, encryptAlgo, false, ['encrypt']).then(function (key) {
                     var iv = window.crypto.getRandomValues(new Uint8Array(12));
                     encryptAlgo.iv = iv;
@@ -353,8 +455,8 @@ function webcrypto_suppl_ecies_decrypt(deriveAlgo, encryptAlgo, private_key, dat
         crv: deriveAlgo.namedCurve,
         ext: true,
         kty: 'EC',
-        x: buf_to_base64url(new Uint8Array(data8.subarray(3, 3 + x_len)).buffer),
-        y: buf_to_base64url(new Uint8Array(data8.subarray(3 + x_len, 3 + x_len + y_len)).buffer)
+        x: Base64URL.encode(data8.subarray(3, 3 + x_len)),
+        y: Base64URL.encode(data8.subarray(3 + x_len, 3 + x_len + y_len))
     };
     data8 = data8.subarray(3 + x_len + y_len + iv_len);
     return new Promise(function (resolve, reject) {
@@ -386,11 +488,12 @@ function main() {
     var change_button_enables = function (enabled) {
         var buttons = document.querySelectorAll('button');
         for (var i = 0; i < buttons.length; ++i) {
+            var btn = buttons[i];
             if (enabled) {
-                buttons[i].removeAttribute('disabled');
+                btn.removeAttribute('disabled');
             }
             else {
-                buttons[i].setAttribute('disabled', 'disabled');
+                btn.setAttribute('disabled', 'disabled');
             }
         }
         ;
@@ -520,7 +623,7 @@ function main() {
         var data = str_to_buf(document.getElementById('msg').value);
         keyStore.find(key).then(function (key) {
             window.crypto.subtle.sign(keyStore.signAlgo, key.sign_key, data).then(function (sign) {
-                document.getElementById('sign').value = buf_to_base64(sign);
+                document.getElementById('sign').value = Base64URL.encode(sign);
             }, function (ev) {
                 alert('sign failed: ' + ev);
             });
@@ -533,7 +636,7 @@ function main() {
         if (!key)
             return;
         var data = str_to_buf(document.getElementById('msg').value);
-        var sign = base64_to_buf(document.getElementById('sign').value);
+        var sign = Base64URL.decode(document.getElementById('sign').value);
         keyStore.find(key).then(function (key) {
             window.crypto.subtle.verify(keyStore.signAlgo, key.verify_key, sign, data).then(function (ret) {
                 alert(ret ? 'verify OK' : 'verify failed');
@@ -551,7 +654,7 @@ function main() {
         var data = str_to_buf(document.getElementById('plain_text').value);
         keyStore.find(key).then(function (key) {
             webcrypto_suppl_ecies_encrypt(keyStore.deriveAlgo, { name: "AES-GCM", length: 128 }, key.derive_key, data).then(function (encrypted) {
-                document.getElementById('cipher').value = buf_to_base64(encrypted);
+                document.getElementById('cipher').value = Base64URL.encode(encrypted);
             }, function (ev) {
                 alert(ev);
             });
@@ -563,7 +666,7 @@ function main() {
         var key = get_active_private_key_id();
         if (!key)
             return;
-        var data = base64url_to_buf(document.getElementById('cipher').value);
+        var data = Base64URL.decode(document.getElementById('cipher').value);
         keyStore.find(key).then(function (key) {
             webcrypto_suppl_ecies_decrypt(keyStore.deriveAlgo, { name: "AES-GCM", length: 128 }, key.derive_key, data).then(function (plain) {
                 document.getElementById('plain_text').value = buf_to_str(plain);
