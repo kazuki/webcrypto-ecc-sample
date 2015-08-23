@@ -1,309 +1,26 @@
 /// <reference path="typings/es6-promise.d.ts" />
+/// <reference path="keystore.ts" />
+/// <reference path="base64.ts" />
 
-/*
- * KeyStore 
- *
- * IndexedDBの"keystore"オブジェクトストアに署名作成・署名検証・鍵交換に必要な鍵を保持する．
- * 現在は楕円曲線暗号にのみ対応しており，署名・鍵交換には同じ鍵を利用する．
- * KeyStoreに保管される鍵情報はすべて同じアルゴリズム・同じ鍵長．
- *
- * オブジェクトストアに格納される情報(秘密鍵有り)
- * {
- *   id: "<鍵を識別するユニークなID>",
- *   private: 秘密鍵(d),
- *   public: 公開鍵(x,y)
- * }
- *
- * KeyStoreから返却される鍵情報(秘密鍵有り)
- * {
- *   id: "<鍵を識別するユニークなID>",
- *   is_private: true,
- *   sign_key: 署名作成に利用する秘密鍵(CryptoKey),
- *   verify_key: 署名検証に利用する公開鍵(CryptoKey),
- *   derive_key: 鍵交換に利用する秘密鍵(CryptoKey),
- *   private_key: 秘密鍵(JSON),
- *   public_key: 公開鍵(JSON),
- * }
- *
- * オブジェクトストアに格納される情報(公開鍵のみ)
- * {
- *   id: "<鍵を識別するユニークなID>",
- *   public: 署名検証に利用する公開鍵(x,y),
- * }
- *
- * KeyStoreから返却される鍵情報(公開鍵のみ)
- * {
- *   id: "<鍵を識別するユニークなID>",
- *   is_private: false,
- *   verify_key: 署名検証に利用する公開鍵(CryptoKey),
- *   derive_key: 鍵交換に利用する公開鍵(CryptoKey),
- *   public_key: 公開鍵(JSON),
- * }
- */
-class KeyStore {
-    db = null;
-    signAlgo = null;
-    deriveAlgo = null;
-
-    constructor() {
-        var namedCurve = 'P-256';
-        this.signAlgo = {
-            name: 'ECDSA',
-            hash: 'SHA-256',
-            namedCurve: namedCurve
-        };
-        this.deriveAlgo = {
-            name: 'ECDH',
-            namedCurve: namedCurve
-        };
-    }
-
-    open(db_name: string) {
-        var req = window.indexedDB.open(db_name, 1);
-        req.onupgradeneeded = () => {
-            var db = req.result;
-            db.createObjectStore('keystore', {
-                keyPath: 'id',
-                autoIncrement: false
-            });
-        };
-        return new Promise((resolve, reject) => {
-            req.onsuccess = () => {
-                this.db = req.result;
-                resolve(this.db);
-            };
-            req.onerror = (ev) => {
-                reject(ev);
-            };
-        });
-    }
-
-    // 秘密鍵を作成し指定したidをキーとして保存する
-    generate(id: string): Promise<any> {
-        // WebCryptographyAPIが残念な出来なので，アルゴリズム的には可能なのだが
-        // sign/verify/deriveKey全てに対応する鍵を作成できない．
-        // そこでECDSA(sign/verify)の鍵を生成後，一度秘密鍵をエクスポートして
-        // ECDH(deriveKey)用の鍵を生成する．
-        // また，IndexedDBのObjectStoreにはexportableではないCryptoKeyを保管できないので
-        // IndexedDBを使う限りは結局のところ秘密鍵に対してexportable属性を付与しなければならない
-        // (Firefox 43.0a1, 2015-08-21)
-
-        return new Promise((resolve, reject) => {
-            window.crypto.subtle.generateKey(this.signAlgo, true, ['sign', 'verify']).then((ecdsa_key) => {
-                window.crypto.subtle.exportKey('jwk', ecdsa_key.privateKey).then((ecdsa_priv) => {
-                    var value = {
-                        'id': id,
-                        'private': ecdsa_priv.d,
-                        'public': {
-                            'x': ecdsa_priv.x,
-                            'y': ecdsa_priv.y
-                        }
-                    };
-                    var transaction = this.db.transaction(['keystore'], 'readwrite');
-                    var store = transaction.objectStore('keystore');
-                    var req = store.add(value);
-                    req.onsuccess = () => {
-                        this._to_cryptokey(value).then((key) => {
-                            resolve(key);
-                        }).catch((ev) => {
-                            reject(ev);
-                        });
-                    };
-                    req.onerror = (ev) => {
-                        reject(ev);
-                    };
-                }).catch((ev) => {
-                    reject(ev);
-                });
-            }).catch((ev) => {
-                reject(ev);
-            });
-        });
-    }
-
-    find(id: string): Promise<any> {
-        var transaction = this.db.transaction(['keystore']);
-        var store = transaction.objectStore('keystore');
-        var req = store.get(id);
-        return new Promise((resolve, reject) => {
-            req.onsuccess = () => {
-                if (req.result) {
-                    this._to_cryptokey(req.result).then((key) => {
-                        resolve(key);
-                    }).catch((ev) => {
-                        reject(ev);
-                    });
-                } else {
-                    reject(undefined);
-                }
-            };
-            req.onerror = (ev) => {
-                reject(ev);
-            };
-        });
-    }
-
-    delete(id: string): Promise<any> {
-        var transaction = this.db.transaction(['keystore'], 'readwrite');
-        var store = transaction.objectStore('keystore');
-        var req = store.delete(id);
-        return new Promise((resolve, reject) => {
-            req.onsuccess = () => {
-                resolve();
-            };
-            req.onerror = (ev) => {
-                reject(ev);
-            };
-        });
-    };
-
-    import(id: string, publicKey): Promise<any> {
-        var pub = {
-            crv: this.signAlgo.namedCurve,
-            ext: true,
-            kty: 'EC',
-            x: publicKey.x,
-            y: publicKey.y
-        };
-        return new Promise((resolve, reject) => {
-            window.crypto.subtle.importKey('jwk', pub, this.signAlgo, false, ['verify']).then((key) => {
-                var value = {
-                    'id': id,
-                    'public': {
-                        'x': pub.x,
-                        'y': pub.y
-                    }
-                };
-                var transaction = this.db.transaction(['keystore'], 'readwrite');
-                var store = transaction.objectStore('keystore');
-                var req = store.add(value);
-                req.onsuccess = () => {
-                    this._to_cryptokey(value).then((key) => {
-                        resolve(key);
-                    }).catch((ev) => {
-                        reject(ev);
-                    });
-                };
-                req.onerror = (ev) => {
-                    reject(ev);
-                };
-            }).catch((ev) => {
-                reject(ev);
-            });
-        });
-    }
-
-    list(): Promise<Array<any>> {
-        var transaction = this.db.transaction(['keystore']);
-        var store = transaction.objectStore('keystore');
-        var req = store.openCursor();
-        var ret = [];
-        return new Promise((resolve, reject) => {
-            req.onsuccess = () => {
-                var cursor = req.result;
-                if (cursor) {
-                    ret.push(this._to_cryptokey(cursor.value));
-                    cursor.continue();
-                } else {
-                    Promise.all(ret).then((values) => {
-                        resolve(values);
-                    }).catch((ev) => {
-                        reject(ev);
-                    });
-                }
-            };
-            req.onerror = (ev) => {
-                reject(ev);
-            };
-        });
-    }
-
-    // ObjectStoreに格納している最低限の情報からCryptoKeyを復元する
-    _to_cryptokey(stored_data) {
-        var x = stored_data.public.x;
-        var y = stored_data.public.y;
-        var d = stored_data.private;
-        return new Promise((resolve, reject) => {
-            var pub = {
-                crv: this.signAlgo.namedCurve,
-                ext: true,
-                kty: 'EC',
-                x: x,
-                y: y
-            };
-            var ret = [];
-            ret.push(window.crypto.subtle.importKey('jwk', pub, this.signAlgo, false, ['verify']));
-            ret.push(window.crypto.subtle.importKey('jwk', pub, this.deriveAlgo, false, ['deriveKey']));
-            if (d) {
-                var priv = {
-                    crv: this.signAlgo.namedCurve,
-                    ext: true,
-                    kty: 'EC',
-                    x: x,
-                    y: y,
-                    d: d,
-                };
-                ret.push(window.crypto.subtle.importKey('jwk', priv, this.signAlgo, false, ['sign']));
-                ret.push(window.crypto.subtle.importKey('jwk', priv, this.deriveAlgo, false, ['deriveKey']));
-            }
-            Promise.all(ret).then((values) => {
-                var ki = {
-                    id: stored_data.id,
-                    is_private: false,
-                    verify_key: values[0],
-                    derive_key: values[1],
-                    public_key: {x: x, y: y},
-                    sign_key: undefined,
-                    private_key: undefined,
-                };
-                if (ret.length == 4) {
-                    ki.is_private = true;
-                    ki.sign_key = values[2];
-                    ki.derive_key = values[3];
-                    ki.private_key = {
-                        d: d,
-                        x: x,
-                        y: y
-                    };
-                }
-                resolve(ki);
-            }).catch((ev) => {
-                reject(ev);
-            });
-        });
-    }
-}
-
-function buf_to_base64(buf: ArrayBuffer): string {
-    return base64js.fromByteArray(new Uint8Array(buf));
-}
-function base64_to_buf(str: string): ArrayBuffer {
-    return base64js.toByteArray(str).buffer;
-}
-function buf_to_base64url(buf: ArrayBuffer): string {
-    return base64js.fromByteArray(new Uint8Array(buf))
-        .replace(/\+/g, '-').replace('/\//g', '_').replace('/=/g', '');
-}
-function base64url_to_buf(str: string): ArrayBuffer {
-    str = str.replace(/-/g, '+').replace(/_/g, '/');
-    while (str.length % 4 != 0)
-        str += '=';
-    return base64js.toByteArray(str).buffer;
-}
-function join_buf(bufs: Array<any>): ArrayBuffer {
+function join_buf(bufs: Array<ArrayBuffer|ArrayBufferView>): ArrayBuffer {
     var total_bytes = 0;
+    var inputs: Array<Uint8Array> = new Array(bufs.length);
     for (var i = 0; i < bufs.length; ++i) {
-        if (!bufs[i].byteLength)
-            bufs[i] = bufs[i].buffer;
-        total_bytes += bufs[i].byteLength;
+        if (bufs[i] instanceof ArrayBuffer) {
+            inputs[i] = new Uint8Array(<ArrayBuffer>bufs[i]);
+        } else {
+            inputs[i] = new Uint8Array((<ArrayBufferView>bufs[i]).buffer,
+                                     (<ArrayBufferView>bufs[i]).byteOffset,
+                                     (<ArrayBufferView>bufs[i]).byteLength);
+        }
+        total_bytes += inputs[i].length;
     }
     var buf = new ArrayBuffer(total_bytes);
     var view = new Uint8Array(buf);
     var off = 0;
-    for (var i = 0; i < bufs.length; ++i) {
-        var tmp = new Uint8Array(bufs[i]);
-        view.set(tmp, off);
-        off += tmp.length;
+    for (var i = 0; i < inputs.length; ++i) {
+        view.set(inputs[i], off);
+        off += inputs[i].length;
     }
     return buf;
 }
@@ -318,8 +35,8 @@ function webcrypto_suppl_ecies_encrypt(deriveAlgo, encryptAlgo, public_key: Cryp
                     namedCurve: deriveAlgo.namedCurve,
                     public: public_key
                 };
-                var x_buf = base64url_to_buf(ephemeral_pubkey.x);
-                var y_buf = base64url_to_buf(ephemeral_pubkey.y);
+                var x_buf = Base64URL.decode(ephemeral_pubkey.x);
+                var y_buf = Base64URL.decode(ephemeral_pubkey.y);
                 window.crypto.subtle.deriveKey(algo, ephemeral_key.privateKey, encryptAlgo, false, ['encrypt']).then((key) => {
                     var iv = window.crypto.getRandomValues(new Uint8Array(12));
                     encryptAlgo.iv = iv;
@@ -356,8 +73,8 @@ function webcrypto_suppl_ecies_decrypt(deriveAlgo, encryptAlgo, private_key: Cry
         crv: deriveAlgo.namedCurve,
         ext: true,
         kty: 'EC',
-        x: buf_to_base64url(new Uint8Array(data8.subarray(3, 3 + x_len)).buffer),
-        y: buf_to_base64url(new Uint8Array(data8.subarray(3 + x_len, 3 + x_len + y_len)).buffer)
+        x: Base64URL.encode(data8.subarray(3, 3 + x_len)),
+        y: Base64URL.encode(data8.subarray(3 + x_len, 3 + x_len + y_len))
     };
     data8 = data8.subarray(3 + x_len + y_len + iv_len);
     return new Promise((resolve, reject) => {
@@ -391,10 +108,11 @@ function main() {
     var change_button_enables = (enabled) => {
         var buttons = document.querySelectorAll('button');
         for (var i = 0; i < buttons.length; ++i) {
+            var btn = <HTMLElement>buttons[i];
             if (enabled) {
-                buttons[i].removeAttribute('disabled');
+                btn.removeAttribute('disabled');
             } else {
-                buttons[i].setAttribute('disabled', 'disabled');
+                btn.setAttribute('disabled', 'disabled');
             }
         };
     };
@@ -514,10 +232,10 @@ function main() {
     document.getElementById('sign_msg').addEventListener('click', () => {
         var key = get_active_private_key_id();
         if (!key) return;
-        var data = str_to_buf(document.getElementById('msg').value);
+        var data = str_to_buf((<HTMLInputElement>document.getElementById('msg')).value);
         keyStore.find(key).then((key) => {
             window.crypto.subtle.sign(keyStore.signAlgo, key.sign_key, data).then((sign) => {
-                document.getElementById('sign').value = buf_to_base64(sign);
+                (<HTMLInputElement>document.getElementById('sign')).value = Base64URL.encode(sign);
             }, (ev) => {
                 alert('sign failed: ' + ev);
             });
@@ -528,8 +246,8 @@ function main() {
     document.getElementById('verify_msg').addEventListener('click', () => {
         var key = get_active_public_key_id();
         if (!key) return;
-        var data = str_to_buf(document.getElementById('msg').value);
-        var sign = base64_to_buf(document.getElementById('sign').value);
+        var data = str_to_buf((<HTMLInputElement>document.getElementById('msg')).value);
+        var sign = Base64URL.decode((<HTMLInputElement>document.getElementById('sign')).value);
         keyStore.find(key).then((key) => {
             window.crypto.subtle.verify(keyStore.signAlgo, key.verify_key, sign, data).then((ret) => {
                 alert(ret ? 'verify OK' : 'verify failed');
@@ -543,10 +261,10 @@ function main() {
     document.getElementById('encrypt').addEventListener('click', () => {
         var key = get_active_public_key_id();
         if (!key) return;
-        var data = str_to_buf(document.getElementById('plain_text').value);
+        var data = str_to_buf((<HTMLInputElement>document.getElementById('plain_text')).value);
         keyStore.find(key).then((key) => {
             webcrypto_suppl_ecies_encrypt(keyStore.deriveAlgo, {name: "AES-GCM", length: 128}, key.derive_key, data).then((encrypted) => {
-                document.getElementById('cipher').value = buf_to_base64(encrypted);
+                (<HTMLInputElement>document.getElementById('cipher')).value = Base64URL.encode(encrypted);
             }, (ev) => {
                 alert(ev);
             });
@@ -557,10 +275,10 @@ function main() {
     document.getElementById('decrypt').addEventListener('click', () => {
         var key = get_active_private_key_id();
         if (!key) return;
-        var data = base64url_to_buf(document.getElementById('cipher').value);
+        var data = Base64URL.decode((<HTMLInputElement>document.getElementById('cipher')).value);
         keyStore.find(key).then((key) => {
             webcrypto_suppl_ecies_decrypt(keyStore.deriveAlgo, {name: "AES-GCM", length: 128}, key.derive_key, data).then((plain) => {
-                document.getElementById('plain_text').value = buf_to_str(plain);
+                (<HTMLInputElement>document.getElementById('plain_text')).value = buf_to_str(plain);
             }, (ev) => {
                 alert(ev);
             });
