@@ -115,7 +115,7 @@ class WebCryptoSupplements {
     }
 
     static _ecc_point_to_bytes(curveName: string, x: ArrayBuffer, y: ArrayBuffer): ArrayBuffer {
-        var len = parseInt(curveName.slice(2)) / 8;
+        var len = Math.ceil(parseInt(curveName.slice(2)) / 8);
         var out = new ArrayBuffer(len * 2 + 1);
         var view = new Uint8Array(out);
         view[0] = 4; // 点圧縮は常に利用しない
@@ -125,7 +125,7 @@ class WebCryptoSupplements {
     }
 
     static _ecc_bytes_to_point(curveName: string, data: ArrayBuffer|ArrayBufferView): Array<ArrayBuffer|Uint8Array> {
-        var len = parseInt(curveName.slice(2)) / 8;
+        var len = Math.ceil(parseInt(curveName.slice(2)) / 8);
         var view = data instanceof ArrayBuffer ? new Uint8Array(<ArrayBuffer>data)
             : new Uint8Array((<ArrayBufferView>data).buffer,
                              (<ArrayBufferView>data).byteOffset,
