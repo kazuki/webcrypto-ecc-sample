@@ -189,6 +189,10 @@ function main() {
             alert(ev);
         });
     });
+    document.getElementById('clear_keystore').addEventListener('click', () => {
+        keyStore.clear();
+        refresh_key_list();
+    });
 
     change_button_enables(false);
     keyStore.open('keystore').then(() => {

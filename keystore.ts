@@ -49,8 +49,14 @@ class KeyStore {
     signAlgo = null;
     deriveAlgo = null;
 
-    constructor() {
-        var namedCurve = 'P-256';
+    constructor(namedCurve = 'P-256') {
+        var hashAlgo = {
+            'P-256': 'SHA-256',
+            'P-384': 'SHA-384',
+            'P-521': 'SHA-512',
+        }[namedCurve];
+        if (!hashAlgo)
+            throw new Error('invalid curve name \"' + namedCurve + '\"');
         this.signAlgo = {
             name: 'ECDSA',
             hash: 'SHA-256',
@@ -153,6 +159,20 @@ class KeyStore {
         var transaction = this.db.transaction([this.store_name], 'readwrite');
         var store = transaction.objectStore(this.store_name);
         var req = store.delete(id);
+        return new Promise((resolve, reject) => {
+            req.onsuccess = () => {
+                resolve();
+            };
+            req.onerror = (ev) => {
+                reject(ev);
+            };
+        });
+    };
+
+    clear(): Promise<any> {
+        var transaction = this.db.transaction([this.store_name], 'readwrite');
+        var store = transaction.objectStore(this.store_name);
+        var req = store.clear();
         return new Promise((resolve, reject) => {
             req.onsuccess = () => {
                 resolve();
