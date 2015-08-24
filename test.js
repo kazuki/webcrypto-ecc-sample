@@ -49,12 +49,19 @@ var __extends = (this && this.__extends) || function (d, b) {
  * }
  */
 var KeyStore = (function () {
-    function KeyStore() {
+    function KeyStore(namedCurve) {
+        if (namedCurve === void 0) { namedCurve = 'P-256'; }
         this.db = null;
         this.store_name = 'keystore';
         this.signAlgo = null;
         this.deriveAlgo = null;
-        var namedCurve = 'P-256';
+        var hashAlgo = {
+            'P-256': 'SHA-256',
+            'P-384': 'SHA-384',
+            'P-521': 'SHA-512'
+        }[namedCurve];
+        if (!hashAlgo)
+            throw new Error('invalid curve name \"' + namedCurve + '\"');
         this.signAlgo = {
             name: 'ECDSA',
             hash: 'SHA-256',
@@ -156,6 +163,20 @@ var KeyStore = (function () {
         var transaction = this.db.transaction([this.store_name], 'readwrite');
         var store = transaction.objectStore(this.store_name);
         var req = store.delete(id);
+        return new Promise(function (resolve, reject) {
+            req.onsuccess = function () {
+                resolve();
+            };
+            req.onerror = function (ev) {
+                reject(ev);
+            };
+        });
+    };
+    ;
+    KeyStore.prototype.clear = function () {
+        var transaction = this.db.transaction([this.store_name], 'readwrite');
+        var store = transaction.objectStore(this.store_name);
+        var req = store.clear();
         return new Promise(function (resolve, reject) {
             req.onsuccess = function () {
                 resolve();
@@ -497,7 +518,7 @@ var WebCryptoSupplements = (function () {
         }[curveName];
     };
     WebCryptoSupplements._ecc_point_to_bytes = function (curveName, x, y) {
-        var len = parseInt(curveName.slice(2)) / 8;
+        var len = Math.ceil(parseInt(curveName.slice(2)) / 8);
         var out = new ArrayBuffer(len * 2 + 1);
         var view = new Uint8Array(out);
         view[0] = 4; // 点圧縮は常に利用しない
@@ -506,7 +527,7 @@ var WebCryptoSupplements = (function () {
         return out;
     };
     WebCryptoSupplements._ecc_bytes_to_point = function (curveName, data) {
-        var len = parseInt(curveName.slice(2)) / 8;
+        var len = Math.ceil(parseInt(curveName.slice(2)) / 8);
         var view = data instanceof ArrayBuffer ? new Uint8Array(data)
             : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
         var x = new ArrayBuffer(len);
@@ -718,6 +739,10 @@ function main() {
         }, function (ev) {
             alert(ev);
         });
+    });
+    document.getElementById('clear_keystore').addEventListener('click', function () {
+        keyStore.clear();
+        refresh_key_list();
     });
     change_button_enables(false);
     keyStore.open('keystore').then(function () {
