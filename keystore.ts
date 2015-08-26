@@ -259,7 +259,7 @@ class KeyStore {
             };
             var ret = [];
             ret.push(window.crypto.subtle.importKey('jwk', pub, this.signAlgo, false, ['verify']));
-            ret.push(window.crypto.subtle.importKey('jwk', pub, this.deriveAlgo, false, ['deriveKey', 'deriveBits']));
+            ret.push(window.crypto.subtle.importKey('jwk', pub, this.deriveAlgo, false, []));
             if (d) {
                 var priv = {
                     crv: this.signAlgo.namedCurve,
