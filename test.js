@@ -480,7 +480,7 @@ var WebCryptoSupplements = (function () {
                 x: Base64URL.encode(pubkey_and_cipher[0]),
                 y: Base64URL.encode(pubkey_and_cipher[1])
             };
-            window.crypto.subtle.importKey('jwk', ephemeral_jwt, deriveAlgo, false, ['deriveBits']).then(function (public_key) {
+            window.crypto.subtle.importKey('jwk', ephemeral_jwt, deriveAlgo, false, []).then(function (public_key) {
                 var algo = {
                     name: deriveAlgo.name,
                     namedCurve: deriveAlgo.namedCurve,
