@@ -265,7 +265,7 @@ var KeyStore = (function () {
             };
             var ret = [];
             ret.push(window.crypto.subtle.importKey('jwk', pub, _this.signAlgo, false, ['verify']));
-            ret.push(window.crypto.subtle.importKey('jwk', pub, _this.deriveAlgo, false, ['deriveKey', 'deriveBits']));
+            ret.push(window.crypto.subtle.importKey('jwk', pub, _this.deriveAlgo, false, []));
             if (d) {
                 var priv = {
                     crv: _this.signAlgo.namedCurve,
@@ -752,49 +752,4 @@ function main() {
         alert('failed: IndexedDB initialization. ' + ev);
     });
 }
-function ecdsa_ecdh_roundtrip_test() {
-    var signAlgo = { name: 'ECDSA', namedCurve: 'P-256' };
-    var deriveAlgo = { name: 'ECDH', namedCurve: 'P-256' };
-    window.crypto.subtle.generateKey(deriveAlgo, true, ['deriveKey']).then(function (ecdh_key) {
-        window.crypto.subtle.exportKey('jwk', ecdh_key.privateKey).then(function (ecdh_priv) {
-            window.crypto.subtle.importKey('jwk', ecdh_priv, deriveAlgo, false, ['deriveKey']).then(function (key) {
-                //console.log('ecdh-priv: round-trip ok');
-            }, function () {
-                alert('ECDH Private Key import not supported');
-            });
-        }, function () {
-            alert('ECDH Private Key export not supported');
-        });
-        window.crypto.subtle.exportKey('jwk', ecdh_key.publicKey).then(function (ecdh_pub) {
-            window.crypto.subtle.importKey('jwk', ecdh_pub, deriveAlgo, false, ['deriveKey']).then(function (key) {
-                //console.log('ecdh-pub: round-trip ok');
-            }, function () {
-                alert('ECDH Public Key import not supported');
-            });
-        }, function () {
-            alert('ECDH Public Key export not supported');
-        });
-    });
-    window.crypto.subtle.generateKey(signAlgo, true, ['sign', 'verify']).then(function (ecdsa_key) {
-        window.crypto.subtle.exportKey('jwk', ecdsa_key.publicKey).then(function (ecdsa_pub) {
-            window.crypto.subtle.importKey('jwk', ecdsa_pub, signAlgo, false, ['verify']).then(function (key) {
-                //console.log('ecdsa-pub: round-trip ok');
-            }, function () {
-                alert('ECDSA Public Key inport not supported');
-            });
-        }, function () {
-            alert('ECDSA Public Key export not supported');
-        });
-        window.crypto.subtle.exportKey('jwk', ecdsa_key.privateKey).then(function (ecdsa_priv) {
-            window.crypto.subtle.importKey('jwk', ecdsa_priv, signAlgo, false, ['sign']).then(function (key) {
-                //console.log('ecdsa-priv: round-trip ok');
-            }, function () {
-                alert('ECDSA Private Key import not supported');
-            });
-        }, function () {
-            alert('ECDSA Private Key export not supported');
-        });
-    });
-}
-ecdsa_ecdh_roundtrip_test();
 document.addEventListener("DOMContentLoaded", main);
