@@ -115,21 +115,11 @@ class KeyStore {
                     var store = transaction.objectStore(this.store_name);
                     var req = store.add(value);
                     req.onsuccess = () => {
-                        this._to_cryptokey(value).then((key) => {
-                            resolve(key);
-                        }).catch((ev) => {
-                            reject(ev);
-                        });
+                        this._to_cryptokey(value).then(resolve, reject);
                     };
-                    req.onerror = (ev) => {
-                        reject(ev);
-                    };
-                }).catch((ev) => {
-                    reject(ev);
-                });
-            }).catch((ev) => {
-                reject(ev);
-            });
+                    req.onerror = reject;
+                }, reject);
+            }, reject);
         });
     }
 
@@ -140,18 +130,12 @@ class KeyStore {
         return new Promise((resolve, reject) => {
             req.onsuccess = () => {
                 if (req.result) {
-                    this._to_cryptokey(req.result).then((key) => {
-                        resolve(key);
-                    }).catch((ev) => {
-                        reject(ev);
-                    });
+                    this._to_cryptokey(req.result).then(resolve, reject);
                 } else {
                     reject(undefined);
                 }
             };
-            req.onerror = (ev) => {
-                reject(ev);
-            };
+            req.onerror = reject;
         });
     }
 
@@ -204,18 +188,10 @@ class KeyStore {
                 var store = transaction.objectStore(this.store_name);
                 var req = store.add(value);
                 req.onsuccess = () => {
-                    this._to_cryptokey(value).then((key) => {
-                        resolve(key);
-                    }).catch((ev) => {
-                        reject(ev);
-                    });
+                    this._to_cryptokey(value).then(resolve, reject);
                 };
-                req.onerror = (ev) => {
-                    reject(ev);
-                };
-            }).catch((ev) => {
-                reject(ev);
-            });
+                req.onerror = reject;
+            }, reject);
         });
     }
 
@@ -231,16 +207,10 @@ class KeyStore {
                     ret.push(this._to_cryptokey(cursor.value));
                     cursor.continue();
                 } else {
-                    Promise.all(ret).then((values) => {
-                        resolve(values);
-                    }).catch((ev) => {
-                        reject(ev);
-                    });
+                    Promise.all(ret).then(resolve, reject);
                 }
             };
-            req.onerror = (ev) => {
-                reject(ev);
-            };
+            req.onerror = reject;
         });
     }
 
@@ -277,9 +247,7 @@ class KeyStore {
                     new PublicKeyInfo(stored_data.id, values[0], values[1], {x: x, y: y}) :
                     new PrivateKeyInfo(stored_data.id, values[2], values[0], values[3], {x: x, y: y, d: d}, {x: x, y: y});
                 resolve(ki);
-            }).catch((ev) => {
-                reject(ev);
-            });
+            }, reject);
         });
     }
 }
