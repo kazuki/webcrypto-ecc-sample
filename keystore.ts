@@ -1,6 +1,3 @@
-/// <reference path="typings/es6-promise.d.ts" />
-/// <reference path="typings/webcrypto.d.ts" />
-
 /*
  * KeyStore 
  *
@@ -101,7 +98,7 @@ class KeyStore {
         // (Firefox 43.0a1, 2015-08-21)
 
         return new Promise((resolve, reject) => {
-            window.crypto.subtle.generateKey(this.signAlgo, true, ['sign', 'verify']).then((ecdsa_key) => {
+            window.crypto.subtle.generateKey(this.signAlgo, true, ['sign', 'verify']).then((ecdsa_key: CryptoKeyPair) => {
                 window.crypto.subtle.exportKey('jwk', ecdsa_key.privateKey).then((ecdsa_priv) => {
                     var value = {
                         'id': id,
