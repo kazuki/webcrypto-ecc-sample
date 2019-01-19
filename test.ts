@@ -1,4 +1,3 @@
-/// <reference path="typings/es6-promise.d.ts" />
 /// <reference path="keystore.ts" />
 /// <reference path="base64.ts" />
 /// <reference path="webcrypto_supplements.ts" />

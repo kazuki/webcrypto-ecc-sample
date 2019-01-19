@@ -1,9 +1,7 @@
-/// <reference path="typings/es6-promise.d.ts" />
 /// <reference path="base64.ts" />
-/// <reference path="typings/webcrypto.d.ts" />
 
 class WebCryptoSupplements {
-    static ecies_encrypt(deriveAlgo: any, public_key: CryptoKey, data: ArrayBuffer|ArrayBufferView): Promise<ArrayBuffer> {
+    static ecies_encrypt(deriveAlgo: any, public_key: CryptoKey, data: ArrayBuffer): Promise<ArrayBuffer> {
         return new Promise((resolve, reject) => {
             if (deriveAlgo.name != 'ECDH') {
                 reject('invalid deriveAlgo.name');
@@ -14,7 +12,7 @@ class WebCryptoSupplements {
                 reject('invalid deriveAlgo.namedCurve');
                 return;
             }
-            window.crypto.subtle.generateKey(deriveAlgo, true, ['deriveBits']).then((ephemeral_key) => {
+            window.crypto.subtle.generateKey(deriveAlgo, true, ['deriveBits']).then((ephemeral_key: CryptoKeyPair) => {
                 window.crypto.subtle.exportKey('jwk', ephemeral_key.publicKey).then((ephemeral_pubkey) => {
                     var algo = {
                         name: deriveAlgo.name,
