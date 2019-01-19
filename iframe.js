@@ -1,3 +1,79 @@
+class _Base64 {
+    static encode(chars, pad, data) {
+        var view = (data instanceof ArrayBuffer ? new Uint8Array(data) :
+            new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
+        var out = '';
+        var i = 0;
+        for (; i < view.length - 2; i += 3) {
+            out += chars[view[i] >> 2];
+            out += chars[((view[i] & 0x3) << 4) | (view[i + 1] >> 4)];
+            out += chars[((view[i + 1] & 0xf) << 2) | (view[i + 2] >> 6)];
+            out += chars[view[i + 2] & 0x3f];
+        }
+        if (view.length % 3) {
+            out += chars[view[i] >> 2];
+            if ((view.length % 3) == 2) {
+                out += chars[((view[i] & 0x3) << 4) | (view[i + 1] >> 4)];
+                out += chars[(view[i + 1] & 0xf) << 2];
+                if (pad)
+                    out += pad;
+            }
+            else {
+                out += chars[(view[i] & 0x3) << 4];
+                if (pad)
+                    out += pad + pad;
+            }
+        }
+        return out;
+    }
+    static decode(chars, pad, data) {
+        if (pad) {
+            var pos = data.indexOf(pad);
+            if (pos >= 0)
+                data = data.slice(0, pos);
+        }
+        var buf = new ArrayBuffer((data.length * 3) >> 2);
+        var view = new Uint8Array(buf);
+        var i = 0, j = 0;
+        for (; i < data.length - 3; i += 4, j += 3) {
+            var x0 = chars.indexOf(data[i]);
+            var x1 = chars.indexOf(data[i + 1]);
+            var x2 = chars.indexOf(data[i + 2]);
+            var x3 = chars.indexOf(data[i + 3]);
+            view[j] = (x0 << 2) | (x1 >> 4);
+            view[j + 1] = ((x1 & 0xf) << 4) | (x2 >> 2);
+            view[j + 2] = ((x2 & 0x3) << 6) | x3;
+        }
+        if (data.length % 4) {
+            var x0 = chars.indexOf(data[i]);
+            var x1 = chars.indexOf(data[i + 1]);
+            view[j++] = (x0 << 2) | (x1 >> 4);
+            if (i + 2 < data.length) {
+                var x2 = chars.indexOf(data[i + 2]);
+                view[j++] = ((x1 & 0xf) << 4) | (x2 >> 2);
+            }
+        }
+        return buf;
+    }
+}
+class Base64 {
+    static encode(data) {
+        return _Base64.encode(Base64.CHARS, '=', data);
+    }
+    static decode(data) {
+        return _Base64.decode(Base64.CHARS, '=', data);
+    }
+}
+Base64.CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+class Base64URL {
+    static encode(data) {
+        return _Base64.encode(Base64URL.CHARS, null, data);
+    }
+    static decode(data) {
+        return _Base64.decode(Base64URL.CHARS, null, data);
+    }
+}
+Base64URL.CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
 /*
  * KeyStore
  *
@@ -272,82 +348,6 @@ class PrivateKeyInfo extends KeyInfo {
         this.private_key = private_key;
     }
 }
-class _Base64 {
-    static encode(chars, pad, data) {
-        var view = (data instanceof ArrayBuffer ? new Uint8Array(data) :
-            new Uint8Array(data.buffer, data.byteOffset, data.byteLength));
-        var out = '';
-        var i = 0;
-        for (; i < view.length - 2; i += 3) {
-            out += chars[view[i] >> 2];
-            out += chars[((view[i] & 0x3) << 4) | (view[i + 1] >> 4)];
-            out += chars[((view[i + 1] & 0xf) << 2) | (view[i + 2] >> 6)];
-            out += chars[view[i + 2] & 0x3f];
-        }
-        if (view.length % 3) {
-            out += chars[view[i] >> 2];
-            if ((view.length % 3) == 2) {
-                out += chars[((view[i] & 0x3) << 4) | (view[i + 1] >> 4)];
-                out += chars[(view[i + 1] & 0xf) << 2];
-                if (pad)
-                    out += pad;
-            }
-            else {
-                out += chars[(view[i] & 0x3) << 4];
-                if (pad)
-                    out += pad + pad;
-            }
-        }
-        return out;
-    }
-    static decode(chars, pad, data) {
-        if (pad) {
-            var pos = data.indexOf(pad);
-            if (pos >= 0)
-                data = data.slice(0, pos);
-        }
-        var buf = new ArrayBuffer((data.length * 3) >> 2);
-        var view = new Uint8Array(buf);
-        var i = 0, j = 0;
-        for (; i < data.length - 3; i += 4, j += 3) {
-            var x0 = chars.indexOf(data[i]);
-            var x1 = chars.indexOf(data[i + 1]);
-            var x2 = chars.indexOf(data[i + 2]);
-            var x3 = chars.indexOf(data[i + 3]);
-            view[j] = (x0 << 2) | (x1 >> 4);
-            view[j + 1] = ((x1 & 0xf) << 4) | (x2 >> 2);
-            view[j + 2] = ((x2 & 0x3) << 6) | x3;
-        }
-        if (data.length % 4) {
-            var x0 = chars.indexOf(data[i]);
-            var x1 = chars.indexOf(data[i + 1]);
-            view[j++] = (x0 << 2) | (x1 >> 4);
-            if (i + 2 < data.length) {
-                var x2 = chars.indexOf(data[i + 2]);
-                view[j++] = ((x1 & 0xf) << 4) | (x2 >> 2);
-            }
-        }
-        return buf;
-    }
-}
-class Base64 {
-    static encode(data) {
-        return _Base64.encode(Base64.CHARS, '=', data);
-    }
-    static decode(data) {
-        return _Base64.decode(Base64.CHARS, '=', data);
-    }
-}
-Base64.CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-class Base64URL {
-    static encode(data) {
-        return _Base64.encode(Base64URL.CHARS, null, data);
-    }
-    static decode(data) {
-        return _Base64.decode(Base64URL.CHARS, null, data);
-    }
-}
-Base64URL.CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
 /// <reference path="base64.ts" />
 class WebCryptoSupplements {
     static ecies_encrypt(deriveAlgo, public_key, data) {
@@ -477,215 +477,71 @@ class WebCryptoSupplements {
         return [x, y, view.subarray(1 + len * 2)];
     }
 }
-/// <reference path="keystore.ts" />
 /// <reference path="base64.ts" />
+/// <reference path="keystore.ts" />
 /// <reference path="webcrypto_supplements.ts" />
-function main() {
-    var keyStore = new KeyStore();
-    var priv_list = document.getElementById('private_keys');
-    var pub_list = document.getElementById('public_keys');
-    var change_button_enables = (enabled) => {
-        var buttons = document.querySelectorAll('button');
-        for (var i = 0; i < buttons.length; ++i) {
-            var btn = buttons[i];
-            if (enabled) {
-                btn.removeAttribute('disabled');
+class State {
+    constructor() {
+        this.key = null;
+        this.pubKey = null;
+        document.addEventListener('DOMContentLoaded', () => {
+            this.contents = document.getElementById('contents');
+        });
+        this.store = new KeyStore();
+        this.store.open('default').then(() => {
+            this.store.find('default').then((key) => {
+                this.key = key;
+                this._init();
+            }, () => {
+                this.store.generate('default').then((key) => {
+                    this.key = key;
+                    this._init();
+                }, (e) => {
+                    console.error('failed: keypair generation', e);
+                });
+            });
+        }, (e) => {
+            console.error('failed: init IndexedDB', e);
+        });
+    }
+    _init() {
+        this.store.import(null, this.key.public_key).then((key) => {
+            this.pubKey = key;
+        });
+        window.addEventListener('message', (e) => {
+            var m = e.data.method;
+            var id = e.data.id;
+            var post = (msg) => {
+                if (e.origin && e.origin !== 'null') {
+                    e.source.postMessage(msg, e.origin);
+                }
+                else {
+                    e.source.postMessage(msg);
+                }
+            };
+            if (m === 'get_public_key') {
+                post({ 'id': id, 'data': this.key.public_key });
             }
-            else {
-                btn.setAttribute('disabled', 'disabled');
+            else if (m === 'encrypt') {
+                // テキストのみ。バイナリ対応させるときはArrayBuffer/Base64で転送とかする
+                var buf = new Uint16Array([].map.call(e.data.data, (c) => c.charCodeAt(0))).buffer;
+                WebCryptoSupplements.ecies_encrypt(this.store.deriveAlgo, this.pubKey.derive_key, buf).then((encrypted) => {
+                    post({ 'id': id, 'result': 'ok', 'data': Base64URL.encode(encrypted) });
+                }, (err) => {
+                    console.error(err);
+                    post({ 'id': id, 'error': 'error' });
+                });
             }
-        }
-        ;
-    };
-    var refresh_key_list = () => {
-        keyStore.list().then((keys) => {
-            while (priv_list.firstChild)
-                priv_list.removeChild(priv_list.firstChild);
-            while (pub_list.firstChild)
-                pub_list.removeChild(pub_list.firstChild);
-            keys.forEach((key) => {
-                var list = pub_list;
-                if (key.is_private)
-                    list = priv_list;
-                var opt = document.createElement('option');
-                opt.text = key.id;
-                list.appendChild(opt);
-            });
-        });
-    };
-    var get_active_key_id = (list) => {
-        if (list.selectedIndex < 0)
-            return null;
-        return list.options[list.selectedIndex].text;
-    };
-    var get_active_private_key_id = () => {
-        return get_active_key_id(priv_list);
-    };
-    var get_active_public_key_id = () => {
-        return get_active_key_id(pub_list);
-    };
-    var delete_key = (key_id) => {
-        keyStore.delete(key_id).then(() => {
-            refresh_key_list();
-        }, (ev) => {
-            alert(ev);
-        });
-    };
-    var export_key = (key_id, is_private) => {
-        keyStore.find(key_id).then((key) => {
-            if (is_private && key.is_private) {
-                prompt('private-key', JSON.stringify(key.private_key));
+            else if (m === 'decrypt') {
+                WebCryptoSupplements.ecies_decrypt(this.store.deriveAlgo, this.key.derive_key, Base64URL.decode(e.data.data)).then((plain) => {
+                    this.contents.innerText = String.fromCharCode.apply("", new Uint16Array(plain));
+                    post({ 'id': id, 'result': 'ok' });
+                }, (err) => {
+                    console.error(err);
+                    post({ 'id': id, 'result': 'error' });
+                });
             }
-            else if (!is_private) {
-                prompt('public-key', JSON.stringify(key.public_key));
-            }
-        }, (ev) => {
-            alert(ev);
         });
-    };
-    var str_to_buf = (str) => {
-        // utf16
-        var buf = new ArrayBuffer(str.length * 2);
-        var view = new Uint16Array(buf);
-        for (var i = 0; i < str.length; ++i) {
-            view[i] = str.charCodeAt(i);
-        }
-        return buf;
-    };
-    var buf_to_str = (buf) => {
-        var out = '';
-        var view = new Uint16Array(buf);
-        for (var i = 0; i < view.length; ++i)
-            out += String.fromCharCode(view[i]);
-        return out;
-    };
-    document.getElementById('private_key_generate').addEventListener('click', () => {
-        var name = prompt('input unique key name');
-        if (name) {
-            keyStore.generate(name).then(() => {
-                alert('success!');
-                refresh_key_list();
-            }, (ev) => {
-                alert(ev);
-            });
-        }
-    });
-    document.getElementById('private_key_delete').addEventListener('click', () => {
-        var key_id = get_active_private_key_id();
-        if (key_id && confirm('"' + key_id + '": delete ok?')) {
-            delete_key(key_id);
-        }
-    });
-    document.getElementById('private_key_export_public').addEventListener('click', () => {
-        var key_id = get_active_private_key_id();
-        if (key_id)
-            export_key(key_id, false);
-    });
-    document.getElementById('private_key_export_private').addEventListener('click', () => {
-        var key_id = get_active_private_key_id();
-        if (key_id)
-            export_key(key_id, true);
-    });
-    document.getElementById('public_key_delete').addEventListener('click', () => {
-        var key_id = get_active_public_key_id();
-        if (key_id && confirm('"' + key_id + '": delete ok?')) {
-            delete_key(key_id);
-        }
-    });
-    document.getElementById('public_key_export').addEventListener('click', () => {
-        var key_id = get_active_public_key_id();
-        if (key_id)
-            export_key(key_id, false);
-    });
-    document.getElementById('public_key_import').addEventListener('click', () => {
-        var name = prompt('input unique key name');
-        if (!name)
-            return;
-        var pub = prompt('input public key');
-        try {
-            pub = JSON.parse(pub);
-            keyStore.import(name, pub).then(() => {
-                alert('success!');
-                refresh_key_list();
-            }, (ev) => {
-                alert(ev);
-            });
-        }
-        catch (ex) {
-            alert(ex);
-        }
-    });
-    document.getElementById('sign_msg').addEventListener('click', () => {
-        var key = get_active_private_key_id();
-        if (!key)
-            return;
-        var data = str_to_buf(document.getElementById('msg').value);
-        keyStore.find(key).then((key) => {
-            window.crypto.subtle.sign(keyStore.signAlgo, key.sign_key, data).then((sign) => {
-                document.getElementById('sign').value = Base64URL.encode(sign);
-            }, (ev) => {
-                alert('sign failed: ' + ev);
-            });
-        }, (ev) => {
-            alert(ev);
-        });
-    });
-    document.getElementById('verify_msg').addEventListener('click', () => {
-        var key = get_active_public_key_id();
-        if (!key)
-            return;
-        var data = str_to_buf(document.getElementById('msg').value);
-        var sign = Base64URL.decode(document.getElementById('sign').value);
-        keyStore.find(key).then((key) => {
-            window.crypto.subtle.verify(keyStore.signAlgo, key.verify_key, sign, data).then((ret) => {
-                alert(ret ? 'verify OK' : 'verify failed');
-            }, (ev) => {
-                alert('verify failed: ' + ev);
-            });
-        }, (ev) => {
-            alert(ev);
-        });
-    });
-    document.getElementById('encrypt').addEventListener('click', () => {
-        var key = get_active_public_key_id();
-        if (!key)
-            return;
-        var data = str_to_buf(document.getElementById('plain_text').value);
-        keyStore.find(key).then((key) => {
-            WebCryptoSupplements.ecies_encrypt(keyStore.deriveAlgo, key.derive_key, data).then((encrypted) => {
-                document.getElementById('cipher').value = Base64URL.encode(encrypted);
-            }, (ev) => {
-                alert(ev);
-            });
-        }, (ev) => {
-            alert(ev);
-        });
-    });
-    document.getElementById('decrypt').addEventListener('click', () => {
-        var key = get_active_private_key_id();
-        if (!key)
-            return;
-        var data = Base64URL.decode(document.getElementById('cipher').value);
-        keyStore.find(key).then((key) => {
-            WebCryptoSupplements.ecies_decrypt(keyStore.deriveAlgo, key.derive_key, data).then((plain) => {
-                document.getElementById('plain_text').value = buf_to_str(plain);
-            }, (ev) => {
-                alert(ev);
-            });
-        }, (ev) => {
-            alert(ev);
-        });
-    });
-    document.getElementById('clear_keystore').addEventListener('click', () => {
-        keyStore.clear();
-        refresh_key_list();
-    });
-    change_button_enables(false);
-    keyStore.open('keystore').then(() => {
-        change_button_enables(true);
-        refresh_key_list();
-    }, (ev) => {
-        alert('failed: IndexedDB initialization. ' + ev);
-    });
+    }
 }
-document.addEventListener("DOMContentLoaded", main);
+new State();
