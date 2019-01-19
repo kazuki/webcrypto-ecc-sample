@@ -181,6 +181,10 @@ class KeyStore {
                         'y': pub.y
                     }
                 };
+                if (id === null) {
+                    this._to_cryptokey(value).then(resolve, reject);
+                    return;
+                }
                 var transaction = this.db.transaction([this.store_name], 'readwrite');
                 var store = transaction.objectStore(this.store_name);
                 var req = store.add(value);
